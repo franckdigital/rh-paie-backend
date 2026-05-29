@@ -167,6 +167,27 @@ class PresenceViewSet(viewsets.ModelViewSet):
         presence.save(update_fields=['statut', 'justification', 'justifie_par'])
         return Response(PresenceSerializer(presence).data)
 
+    @action(detail=True, methods=['post'])
+    def corriger(self, request, pk=None):
+        """Correction manuelle des heures d'arrivée / départ."""
+        from django.utils.dateparse import parse_time
+        presence = self.get_object()
+        fields = []
+        for field in ('heure_arrivee', 'heure_depart'):
+            val = request.data.get(field)
+            if val is not None:
+                t = parse_time(val)
+                if not t:
+                    return Response({'detail': f'Format invalide pour {field} (HH:MM attendu).'}, status=400)
+                setattr(presence, field, t)
+                fields.append(field)
+        if not fields:
+            return Response({'detail': 'Aucun champ à corriger.'}, status=400)
+        presence.calcul_automatique = False
+        presence.calculer_heures()
+        presence.save(update_fields=fields + ['heures_travaillees', 'heures_nuit', 'calcul_automatique'])
+        return Response(PresenceSerializer(presence).data)
+
     @action(detail=False, methods=['get'], url_path='export-csv')
     def export_csv(self, request):
         qs = self.filter_queryset(self.get_queryset())
