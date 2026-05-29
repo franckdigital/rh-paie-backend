@@ -45,11 +45,20 @@ class PointageViewSet(viewsets.ModelViewSet):
             employe.save(update_fields=['user'])
 
         site = self.request.user.site or employe.site
+
+        # Résoudre le shift planifié du jour
+        from planning.models import LignePlanning
+        ligne = LignePlanning.objects.filter(
+            employe=employe, date=now.date()
+        ).select_related('shift').first()
+        shift_prevu = ligne.shift if ligne else None
+
         serializer.save(
             employe=employe,
             datetime_pointage=now,
             date_pointage=now.date(),
             site=site,
+            shift_prevu=shift_prevu,
         )
 
     @action(detail=False, methods=['get'])

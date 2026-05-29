@@ -51,11 +51,24 @@ class PointageEntreeSerializer(serializers.ModelSerializer):
 
     def _maj_presence(self, pointage):
         from presences.models import Presence
+        # Chercher le shift depuis LignePlanning si non fourni
+        shift = pointage.shift_prevu
+        if not shift:
+            from planning.models import LignePlanning
+            ligne = LignePlanning.objects.filter(
+                employe=pointage.employe, date=pointage.date_pointage
+            ).select_related('shift').first()
+            shift = ligne.shift if ligne else None
+
         presence, _ = Presence.objects.get_or_create(
             employe=pointage.employe,
             date=pointage.date_pointage,
-            defaults={'site': pointage.site, 'shift': pointage.shift_prevu}
+            defaults={'site': pointage.site, 'shift': shift}
         )
+        # Mettre à jour le shift si absent à la création
+        if shift and not presence.shift_id:
+            presence.shift = shift
+
         if pointage.type_pointage == 'entree':
             presence.heure_arrivee = pointage.datetime_pointage.time()
             presence.pointage_entree = pointage
@@ -63,20 +76,22 @@ class PointageEntreeSerializer(serializers.ModelSerializer):
             presence.heure_depart = pointage.datetime_pointage.time()
             presence.pointage_sortie = pointage
             presence.calculer_heures()
-        if presence.heure_arrivee and pointage.shift_prevu:
-            debut_prevu = pointage.shift_prevu.heure_debut
+
+        if presence.heure_arrivee and shift:
+            from datetime import datetime
             arrivee = presence.heure_arrivee
+            debut_prevu = shift.heure_debut
             if arrivee > debut_prevu:
-                from datetime import datetime
                 retard = (datetime.combine(pointage.date_pointage, arrivee) -
-                         datetime.combine(pointage.date_pointage, debut_prevu))
+                          datetime.combine(pointage.date_pointage, debut_prevu))
                 presence.retard_minutes = retard.seconds // 60
-                if presence.retard_minutes > 5:
-                    presence.statut = 'retard'
-                else:
-                    presence.statut = 'present'
+                presence.statut = 'retard' if presence.retard_minutes > 5 else 'present'
             else:
                 presence.statut = 'present'
+                presence.retard_minutes = 0
+        elif presence.heure_arrivee:
+            presence.statut = 'present'
+
         presence.save()
 
 
