@@ -31,8 +31,17 @@ class BulletinPaieViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def calculer(self, request, pk=None):
-        """Recalcule automatiquement le bulletin."""
+        """Recalcule automatiquement le bulletin (sync presences puis calcul complet)."""
         bulletin = self.get_object()
+        bulletin.sync_depuis_presences()
+        bulletin.calculer_salaire_complet()
+        return Response(BulletinPaieSerializer(bulletin).data)
+
+    @action(detail=True, methods=['post'], url_path='sync-presences')
+    def sync_presences(self, request, pk=None):
+        """Synchronise les absences et retards depuis les Présences réelles, puis recalcule."""
+        bulletin = self.get_object()
+        bulletin.sync_depuis_presences()
         bulletin.calculer_salaire_complet()
         return Response(BulletinPaieSerializer(bulletin).data)
 
@@ -186,10 +195,12 @@ class BulletinPaieViewSet(viewsets.ModelViewSet):
                     bulletin.heures_supp_25 = recap.heures_supp_25
                     bulletin.heures_supp_50 = recap.heures_supp_50
                     bulletin.jours_absents = recap.jours_absents
+                    bulletin.retard_minutes_total = recap.retards_minutes_total
                     bulletin.recap_heures = recap
                     bulletin.save()
                 except RecapHeures.DoesNotExist:
-                    pass
+                    # Pas de récap heures → lire directement les présences
+                    bulletin.sync_depuis_presences()
                 # Auto-add transport / panier / prime poste from global ElementSalaire
                 from django.db import models
                 elements_auto = ElementSalaire.objects.filter(

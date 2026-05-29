@@ -21,6 +21,7 @@ class ElementSalaire(models.Model):
         ('impot', 'Impôt (ITS/IRPP)'),
         ('cmu', 'CMU'),
         ('absence', 'Déduction absence'),
+        ('retard', 'Déduction retard'),
         ('avance', 'Avance sur salaire'),
         ('autre', 'Autre'),
     ]
@@ -63,6 +64,8 @@ class BulletinPaie(models.Model):
     jours_travailles = models.IntegerField(default=26)
     jours_absents = models.IntegerField(default=0)
     deduction_absence = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    retard_minutes_total = models.IntegerField(default=0, help_text='Total minutes de retard sur la période')
+    deduction_retard = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     # Heures
     heures_normales = models.DecimalField(max_digits=7, decimal_places=2, default=0)
@@ -143,16 +146,65 @@ class BulletinPaie(models.Model):
             }
         )
 
+    def _sync_deduction_retard(self):
+        """Crée ou met à jour la ligne de déduction retard sur le bulletin."""
+        from decimal import Decimal
+        if not self.retard_minutes_total or self.retard_minutes_total <= 0:
+            self.lignes.filter(element__code='DEDUCT_RETARD').delete()
+            return
+        taux_horaire = float(self.salaire_base) / (26 * 8)
+        montant_retard = round((float(self.retard_minutes_total) / 60) * taux_horaire, 2)
+        if montant_retard <= 0:
+            return
+        elem, _ = ElementSalaire.objects.get_or_create(
+            code='DEDUCT_RETARD',
+            defaults={
+                'nom': 'Déduction retards', 'type': 'retenue',
+                'categorie': 'retard', 'est_imposable': False, 'est_soumis_cnps': False,
+            }
+        )
+        LigneBulletin.objects.update_or_create(
+            bulletin=self, element=elem,
+            defaults={
+                'base': self.salaire_base,
+                'taux': Decimal('0'),
+                'quantite': Decimal(str(round(self.retard_minutes_total / 60, 4))),
+                'montant': Decimal(str(montant_retard)),
+            }
+        )
+
+    def sync_depuis_presences(self):
+        """Recalcule jours_absents et retard_minutes_total depuis les Présences réelles de la période."""
+        from presences.models import Presence
+        from django.db.models import Count, Sum, Q
+        presences = Presence.objects.filter(
+            employe=self.employe,
+            date__gte=self.periode_debut,
+            date__lte=self.periode_fin,
+        )
+        agg = presences.aggregate(
+            jours_abs=Count('id', filter=Q(statut='absent_non_justifie')),
+            retard_min=Sum('retard_minutes'),
+        )
+        self.jours_absents = agg['jours_abs'] or 0
+        self.retard_minutes_total = agg['retard_min'] or 0
+        self.save(update_fields=['jours_absents', 'retard_minutes_total'])
+
     def calculer_salaire_complet(self):
         """Calcul automatique du bulletin depuis les récaps d'heures."""
         # Ancienneté auto
         self._sync_prime_anciennete()
+        # Retard auto
+        self._sync_deduction_retard()
 
         taux_journalier = float(self.salaire_base) / 26
         taux_horaire = float(self.salaire_base) / (26 * 8)
 
         # Déduction absences
         self.deduction_absence = round(self.jours_absents * taux_journalier, 2)
+
+        # Déduction retards
+        self.deduction_retard = round((float(self.retard_minutes_total) / 60) * taux_horaire, 2)
 
         # Montants heures spéciales
         self.montant_heures_nuit = round(float(self.heures_nuit) * taux_horaire * 0.15, 2)
@@ -170,9 +222,12 @@ class BulletinPaie(models.Model):
             gains_lignes + self.montant_heures_nuit + self.montant_heures_supp + self.montant_heures_ferie, 2
         )
 
-        # Salaire brut
+        # Salaire brut (absences + retards déduits)
         self.salaire_brut = round(
-            float(self.salaire_base) - float(self.deduction_absence) + float(self.total_gains), 2
+            float(self.salaire_base)
+            - float(self.deduction_absence)
+            - float(self.deduction_retard)
+            + float(self.total_gains), 2
         )
         self.salaire_brut_imposable = self.salaire_brut
 
