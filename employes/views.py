@@ -29,12 +29,12 @@ class FichePosteViewSet(viewsets.ModelViewSet):
 
 
 class DepartementViewSet(viewsets.ModelViewSet):
-    queryset = Departement.objects.select_related('site').all()
+    queryset = Departement.objects.select_related('site', 'entreprise').all()
     serializer_class = DepartementSerializer
     rbac_module = 'employes'
     permission_classes = [permissions.IsAuthenticated, RBACPermission]
     filter_backends = [filters.SearchFilter, DjangoFilterBackend]
-    filterset_fields = ['site']
+    filterset_fields = ['site', 'entreprise']
     search_fields = ['nom']
 
 

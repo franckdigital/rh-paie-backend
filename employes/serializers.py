@@ -11,6 +11,7 @@ class FichePosteSerializer(serializers.ModelSerializer):
 class DepartementSerializer(serializers.ModelSerializer):
     nombre_employes = serializers.SerializerMethodField()
     site_nom = serializers.CharField(source='site.nom', read_only=True)
+    entreprise_nom = serializers.CharField(source='entreprise.nom', read_only=True)
 
     class Meta:
         model = Departement
