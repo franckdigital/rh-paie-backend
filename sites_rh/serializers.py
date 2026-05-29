@@ -27,7 +27,7 @@ class SiteListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Site
-        fields = ['id', 'nom', 'code', 'type_site', 'ville', 'entreprise', 'entreprise_nom',
+        fields = ['id', 'nom', 'code', 'type_site', 'pays', 'ville', 'entreprise', 'entreprise_nom',
                   'nombre_employes', 'latitude', 'longitude', 'rayon_geofence', 'est_actif']
 
     def get_nombre_employes(self, obj):

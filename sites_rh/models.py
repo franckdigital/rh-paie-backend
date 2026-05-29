@@ -17,6 +17,7 @@ class Site(models.Model):
     code = models.CharField(max_length=20, unique=True)
     type_site = models.CharField(max_length=30, choices=TYPE_CHOICES, default='agence')
     adresse = models.TextField(blank=True)
+    pays = models.CharField(max_length=100, blank=True, verbose_name='Pays')
     ville = models.CharField(max_length=100, blank=True)
     # Géolocalisation
     latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)

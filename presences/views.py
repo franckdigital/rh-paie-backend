@@ -242,6 +242,103 @@ class PresenceViewSet(viewsets.ModelViewSet):
             use_landscape=True,
         )
 
+    @action(detail=False, methods=['post'], url_path='verifier-absences')
+    def verifier_absences(self, request):
+        """
+        Parcourt les LignePlanning de la date donnée et :
+        - Crée une Présence 'absent_non_justifie' pour chaque employé sans pointage
+          dont l'heure de début de shift est passée.
+        - Recalcule retard_minutes + statut pour ceux qui ont pointé mais n'ont
+          pas de retard enregistré (cas : pas de shift au moment du pointage).
+        """
+        from datetime import date as _date, datetime
+        from planning.models import LignePlanning
+        from django.utils import timezone as tz
+
+        date_str = request.data.get('date', tz.now().date().isoformat())
+        try:
+            jour = _date.fromisoformat(date_str)
+        except ValueError:
+            return Response({'detail': 'Format date invalide (YYYY-MM-DD)'}, status=400)
+
+        grace_min = int(request.data.get('grace_minutes', 5))
+        now_aware = tz.now()
+
+        lignes = LignePlanning.objects.filter(date=jour).select_related('employe', 'shift', 'employe__site')
+
+        crees = updated = ignores = 0
+
+        for ligne in lignes:
+            employe = ligne.employe
+            shift   = ligne.shift
+            if not shift:
+                ignores += 1
+                continue
+
+            presence, is_new = Presence.objects.get_or_create(
+                employe=employe,
+                date=jour,
+                defaults={
+                    'site':    employe.site,
+                    'shift':   shift,
+                    'statut':  'absent_non_justifie',
+                    'calcul_automatique': True,
+                }
+            )
+
+            if is_new:
+                # Marquer absent seulement si l'heure de début est passée
+                debut_naive = datetime.combine(jour, shift.heure_debut)
+                debut_aware = tz.make_aware(debut_naive) if tz.is_naive(debut_naive) else debut_naive
+                if now_aware <= debut_aware:
+                    # Shift pas encore commencé → supprimer la présence créée prématurément
+                    presence.delete()
+                    ignores += 1
+                else:
+                    crees += 1
+                continue
+
+            # Présence existante — skip si modifiée manuellement
+            if not presence.calcul_automatique:
+                ignores += 1
+                continue
+
+            # Recalculer retard si l'employé a pointé
+            if presence.heure_arrivee:
+                if not presence.shift_id:
+                    presence.shift = shift
+                arrivee_dt = datetime.combine(jour, presence.heure_arrivee)
+                debut_dt   = datetime.combine(jour, shift.heure_debut)
+                if arrivee_dt > debut_dt:
+                    delta_min = int((arrivee_dt - debut_dt).total_seconds() // 60)
+                    presence.retard_minutes = delta_min
+                    presence.statut = 'retard' if delta_min > grace_min else 'present'
+                else:
+                    presence.retard_minutes = 0
+                    presence.statut = 'present'
+                presence.save(update_fields=['shift', 'retard_minutes', 'statut'])
+                updated += 1
+            else:
+                # Pas de pointage — marquer absent si shift commencé
+                debut_naive = datetime.combine(jour, shift.heure_debut)
+                debut_aware = tz.make_aware(debut_naive) if tz.is_naive(debut_naive) else debut_naive
+                if now_aware > debut_aware:
+                    if not presence.shift_id:
+                        presence.shift = shift
+                    presence.statut = 'absent_non_justifie'
+                    presence.save(update_fields=['shift', 'statut'])
+                    updated += 1
+                else:
+                    ignores += 1
+
+        return Response({
+            'date':              jour.isoformat(),
+            'lignes_traitees':   lignes.count(),
+            'absences_creees':   crees,
+            'mises_a_jour':      updated,
+            'ignores':           ignores,
+        })
+
     @action(detail=False, methods=['get'])
     def mensuel(self, request):
         annee = int(request.query_params.get('annee', timezone.now().year))
