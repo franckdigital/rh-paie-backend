@@ -5,14 +5,18 @@ from .models import User
 
 class UserSerializer(serializers.ModelSerializer):
     entreprise_nom = serializers.CharField(source='entreprise.nom', read_only=True)
-    site_nom = serializers.CharField(source='site.nom', read_only=True)
-    role_display = serializers.CharField(source='get_role_display', read_only=True)
+    site_nom       = serializers.CharField(source='site.nom', read_only=True)
+    role_display   = serializers.CharField(source='get_role_display', read_only=True)
+    role_label     = serializers.CharField(source='role_label', read_only=True)
+    role_obj_label = serializers.CharField(source='role_obj.label', read_only=True, allow_null=True)
+    role_obj_couleur = serializers.CharField(source='role_obj.couleur', read_only=True, allow_null=True)
 
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name',
-            'role', 'role_display', 'telephone', 'photo',
+            'role', 'role_display', 'role_label', 'role_obj', 'role_obj_label', 'role_obj_couleur',
+            'telephone', 'photo',
             'entreprise', 'entreprise_nom', 'site', 'site_nom',
             'is_active', 'created_at',
         ]
@@ -50,6 +54,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def get_token(cls, user):
         token = super().get_token(user)
         token['role'] = user.role
+        token['role_obj_id'] = user.role_obj_id
         token['full_name'] = user.get_full_name()
         return token
 

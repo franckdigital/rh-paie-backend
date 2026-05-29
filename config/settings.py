@@ -26,6 +26,8 @@ INSTALLED_APPS = [
     'django_celery_beat',
     # Local
     'users',
+    'roles',
+    'notifications',
     'entreprises',
     'sites_rh',
     'employes',

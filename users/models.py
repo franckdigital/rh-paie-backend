@@ -31,6 +31,12 @@ class User(AbstractUser):
     }
 
     role = models.CharField(max_length=30, choices=ROLE_CHOICES, default='employe')
+    # Rôle dynamique DB (prioritaire sur role CharField si défini)
+    role_obj = models.ForeignKey(
+        'roles.Role', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='utilisateurs',
+        verbose_name='Rôle personnalisé',
+    )
     telephone = models.CharField(max_length=20, blank=True)
     photo = models.ImageField(upload_to='users/', blank=True, null=True)
 
@@ -55,15 +61,31 @@ class User(AbstractUser):
         return f"{self.get_full_name()} ({self.get_role_display()})"
 
     def has_permission(self, permission):
+        module, action = (permission.split('.') + ['*'])[:2]
+
+        # Priorité au rôle dynamique DB
+        if self.role_obj_id:
+            from django.db.models import Q
+            return self.role_obj.permissions.filter(
+                Q(module='*', action='*') |
+                Q(module=module, action__in=[action, '*'])
+            ).exists()
+
+        # Fallback : PERMISSIONS_PAR_ROLE statique
         role_perms = self.PERMISSIONS_PAR_ROLE.get(self.role, [])
         if '*' in role_perms:
             return True
-        module, action = (permission.split('.') + ['*'])[:2]
         for perm in role_perms:
             p_module, p_action = (perm.split('.') + ['*'])[:2]
             if p_module in (module, '*') and p_action in (action, '*'):
                 return True
         return False
+
+    @property
+    def role_label(self):
+        if self.role_obj_id:
+            return self.role_obj.label
+        return self.get_role_display()
 
     @property
     def is_rh(self):

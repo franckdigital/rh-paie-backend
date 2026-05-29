@@ -26,11 +26,18 @@ class RotationEquipeViewSet(viewsets.ModelViewSet):
 
 
 class EquipeViewSet(viewsets.ModelViewSet):
-    queryset = Equipe.objects.select_related('site', 'chef_equipe', 'rotation').filter(est_actif=True)
     serializer_class = EquipeSerializer
-    rbac_module = 'planning'
+    rbac_module = 'equipes'
     permission_classes = [permissions.IsAuthenticated, RBACPermission]
     filterset_fields = ['site', 'rotation']
+
+    def get_queryset(self):
+        qs = Equipe.objects.select_related('site', 'chef_equipe', 'rotation').filter(est_actif=True)
+        user = self.request.user
+        # Superviseurs/chefs d'équipe ne voient que les équipes de leur site
+        if user.site_id and not user.has_permission('equipes.*'):
+            qs = qs.filter(site=user.site)
+        return qs
 
     @action(detail=True, methods=['get'])
     def membres(self, request, pk=None):
