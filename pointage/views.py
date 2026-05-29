@@ -24,12 +24,26 @@ class PointageViewSet(viewsets.ModelViewSet):
         from employes.models import Employe
         from rest_framework.exceptions import ValidationError as DRFValidationError
         now = timezone.now()
-        employe = getattr(self.request.user, 'employe', None)
+
+        # 1. Via OneToOneField (si compte créé avec creer-compte)
+        employe = None
+        try:
+            employe = self.request.user.employe
+        except Exception:
+            pass
+
+        # 2. Fallback par email (seed / admin Django)
+        if not employe and self.request.user.email:
+            employe = Employe.objects.filter(email=self.request.user.email).first()
+
         if not employe:
-            try:
-                employe = Employe.objects.get(email=self.request.user.email, statut='actif')
-            except Employe.DoesNotExist:
-                raise DRFValidationError({'detail': 'Aucun profil employé associé à ce compte.'})
+            raise DRFValidationError({'detail': 'Aucun profil employé associé à ce compte.'})
+
+        # Lier le compte pour les prochains appels
+        if not employe.user_id:
+            employe.user = self.request.user
+            employe.save(update_fields=['user'])
+
         site = self.request.user.site or employe.site
         serializer.save(
             employe=employe,
