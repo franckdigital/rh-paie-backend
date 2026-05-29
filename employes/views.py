@@ -1,7 +1,9 @@
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from django_filters.rest_framework import DjangoFilterBackend
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from .models import Employe, Departement, Poste, FichePoste, AffectationHistorique
 from .serializers import (
@@ -61,6 +63,19 @@ class EmployeViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             return EmployeListSerializer
         return EmployeDetailSerializer
+
+    def _handle_validation(self, serializer):
+        try:
+            serializer.save()
+        except DjangoValidationError as e:
+            detail = e.message_dict if hasattr(e, 'message_dict') else {'non_field_errors': e.messages}
+            raise DRFValidationError(detail=detail)
+
+    def perform_create(self, serializer):
+        self._handle_validation(serializer)
+
+    def perform_update(self, serializer):
+        self._handle_validation(serializer)
 
     @action(detail=True, methods=['post'])
     def muter(self, request, pk=None):
