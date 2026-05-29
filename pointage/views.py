@@ -3,8 +3,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
-from .models import Pointage, AnomaliePointage, VerrouAppareil
-from .serializers import PointageSerializer, PointageEntreeSerializer, AnomaliePointageSerializer, VerrouAppareilSerializer
+from .models import Pointage, AnomaliePointage, VerrouAppareil, PositionAgent, EloignementAgent
+from .serializers import (
+    PointageSerializer, PointageEntreeSerializer,
+    AnomaliePointageSerializer, VerrouAppareilSerializer,
+    PositionAgentSerializer, EloignementAgentSerializer,
+)
 from users.permissions import RBACPermission
 
 
@@ -241,6 +245,110 @@ class PointageViewSet(viewsets.ModelViewSet):
         return Response({'status': 'verrouillé', 'proprietaire': employe.nom_complet})
 
 
+    # ------------------------------------------------------------------ tracking
+    @action(detail=False, methods=['post'], url_path='ma-position')
+    def ma_position(self, request):
+        """L'app mobile envoie la position GPS de l'agent (ping toutes les 2 min)."""
+        from employes.models import Employe
+
+        employe = None
+        try:
+            employe = request.user.employe
+        except Exception:
+            employe = Employe.objects.filter(email=request.user.email).first()
+        if not employe:
+            return Response({'detail': 'Profil employé introuvable'}, status=status.HTTP_404_NOT_FOUND)
+
+        lat = request.data.get('latitude')
+        lon = request.data.get('longitude')
+        if lat is None or lon is None:
+            return Response({'detail': 'latitude et longitude requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+        site = request.user.site or employe.site
+        now  = timezone.now()
+
+        pos = PositionAgent(
+            employe=employe,
+            latitude=lat,
+            longitude=lon,
+            precision_gps=request.data.get('precision_gps'),
+            timestamp=now,
+            site_affecte=site,
+            device_id=request.data.get('device_id', ''),
+        )
+        pos.save()   # calcule distance_site + est_hors_site
+
+        # Gestion des éloignements
+        eloig_actif = EloignementAgent.objects.filter(employe=employe, est_actif=True).first()
+        if pos.est_hors_site:
+            if not eloig_actif:
+                EloignementAgent.objects.create(
+                    employe=employe,
+                    site=site,
+                    debut=now,
+                    distance_max=pos.distance_site or 0,
+                )
+            else:
+                if pos.distance_site and pos.distance_site > eloig_actif.distance_max:
+                    eloig_actif.distance_max = pos.distance_site
+                    eloig_actif.save(update_fields=['distance_max'])
+        else:
+            if eloig_actif:
+                eloig_actif.fin = now
+                eloig_actif.est_actif = False
+                eloig_actif.save(update_fields=['fin', 'est_actif'])
+
+        return Response({
+            'distance_site':  pos.distance_site,
+            'est_hors_site':  pos.est_hors_site,
+            'seuil_metres':   site.rayon_geofence if site else 100,
+        })
+
+    @action(detail=False, methods=['get'], url_path='positions-temps-reel')
+    def positions_temps_reel(self, request):
+        """Dernière position connue de chaque agent (pour la cartographie admin)."""
+        from django.db.models import OuterRef, Subquery
+
+        site_id = request.query_params.get('site')
+        # Sous-requête : id de la dernière position par employe
+        derniere = PositionAgent.objects.filter(
+            employe=OuterRef('employe')
+        ).order_by('-timestamp').values('id')[:1]
+
+        qs = PositionAgent.objects.filter(
+            id__in=Subquery(derniere)
+        ).select_related('employe', 'site_affecte')
+
+        if site_id:
+            qs = qs.filter(site_affecte_id=site_id)
+
+        return Response(PositionAgentSerializer(qs, many=True).data)
+
+    @action(detail=False, methods=['get'], url_path='stats-eloignement')
+    def stats_eloignement(self, request):
+        """Statistiques d'éloignement par agent (total heures, nb épisodes)."""
+        from django.db.models import Sum, Count, F, ExpressionWrapper, DurationField
+        from django.db.models.functions import Now
+        import datetime
+
+        site_id     = request.query_params.get('site')
+        employe_id  = request.query_params.get('employe')
+        date_debut  = request.query_params.get('date_debut')
+        date_fin    = request.query_params.get('date_fin')
+
+        qs = EloignementAgent.objects.select_related('employe', 'site').all()
+        if site_id:
+            qs = qs.filter(site_id=site_id)
+        if employe_id:
+            qs = qs.filter(employe_id=employe_id)
+        if date_debut:
+            qs = qs.filter(debut__date__gte=date_debut)
+        if date_fin:
+            qs = qs.filter(debut__date__lte=date_fin)
+
+        return Response(EloignementAgentSerializer(qs, many=True).data)
+
+
 class AnomaliePointageViewSet(viewsets.ModelViewSet):
     queryset = AnomaliePointage.objects.select_related('employe', 'pointage').all()
     serializer_class = AnomaliePointageSerializer
@@ -256,6 +364,16 @@ class AnomaliePointageViewSet(viewsets.ModelViewSet):
         anomalie.traite_par = request.user
         anomalie.save()
         return Response({'status': 'justifié'})
+
+
+class EloignementAgentViewSet(viewsets.ReadOnlyModelViewSet):
+    """Liste les éloignements (lecture seule) pour le dashboard admin."""
+    queryset = EloignementAgent.objects.select_related('employe', 'site').all()
+    serializer_class = EloignementAgentSerializer
+    rbac_module = 'pointage'
+    permission_classes = [permissions.IsAuthenticated, RBACPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['employe', 'site', 'est_actif']
 
 
 class VerrouAppareilViewSet(viewsets.GenericViewSet,

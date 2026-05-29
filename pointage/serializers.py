@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Pointage, AnomaliePointage, VerrouAppareil
+from .models import Pointage, AnomaliePointage, VerrouAppareil, PositionAgent, EloignementAgent
 
 
 class PointageSerializer(serializers.ModelSerializer):
@@ -110,3 +110,47 @@ class VerrouAppareilSerializer(serializers.ModelSerializer):
     class Meta:
         model  = VerrouAppareil
         fields = ['id', 'device_id', 'employe', 'employe_nom', 'employe_matricule', 'locked_at']
+
+
+class PositionAgentSerializer(serializers.ModelSerializer):
+    employe_nom       = serializers.CharField(source='employe.nom_complet', read_only=True)
+    employe_matricule = serializers.CharField(source='employe.matricule', read_only=True)
+    employe_initiales = serializers.SerializerMethodField(read_only=True)
+    site_nom          = serializers.CharField(source='site_affecte.nom', read_only=True)
+    site_lat          = serializers.DecimalField(source='site_affecte.latitude', max_digits=10, decimal_places=7, read_only=True)
+    site_lon          = serializers.DecimalField(source='site_affecte.longitude', max_digits=10, decimal_places=7, read_only=True)
+    site_rayon        = serializers.IntegerField(source='site_affecte.rayon_geofence', read_only=True)
+
+    class Meta:
+        model  = PositionAgent
+        fields = [
+            'id', 'employe', 'employe_nom', 'employe_matricule', 'employe_initiales',
+            'latitude', 'longitude', 'precision_gps', 'timestamp',
+            'site_affecte', 'site_nom', 'site_lat', 'site_lon', 'site_rayon',
+            'distance_site', 'est_hors_site', 'device_id',
+        ]
+        extra_kwargs = {
+            'employe':     {'required': False},
+            'site_affecte': {'required': False},
+        }
+
+    def get_employe_initiales(self, obj):
+        e = obj.employe
+        return f"{(e.prenom or '')[:1]}{(e.nom or '')[:1]}".upper()
+
+
+class EloignementAgentSerializer(serializers.ModelSerializer):
+    employe_nom       = serializers.CharField(source='employe.nom_complet', read_only=True)
+    employe_matricule = serializers.CharField(source='employe.matricule', read_only=True)
+    site_nom          = serializers.CharField(source='site.nom', read_only=True)
+    duree_minutes     = serializers.FloatField(read_only=True)
+    duree_heures      = serializers.FloatField(read_only=True)
+
+    class Meta:
+        model  = EloignementAgent
+        fields = [
+            'id', 'employe', 'employe_nom', 'employe_matricule',
+            'site', 'site_nom',
+            'debut', 'fin', 'distance_max', 'est_actif',
+            'duree_minutes', 'duree_heures',
+        ]

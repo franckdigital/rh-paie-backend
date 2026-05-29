@@ -147,6 +147,68 @@ class VerrouAppareil(models.Model):
         return f"{self.employe} — {self.device_id[:40]}"
 
 
+class PositionAgent(models.Model):
+    """Ping GPS temps réel envoyé par l'app mobile."""
+    employe       = models.ForeignKey('employes.Employe', on_delete=models.CASCADE, related_name='positions_gps')
+    latitude      = models.DecimalField(max_digits=10, decimal_places=7)
+    longitude     = models.DecimalField(max_digits=10, decimal_places=7)
+    precision_gps = models.FloatField(null=True, blank=True)
+    timestamp     = models.DateTimeField(default=None)
+    site_affecte  = models.ForeignKey('sites_rh.Site', null=True, blank=True, on_delete=models.SET_NULL, related_name='positions_agents')
+    distance_site = models.FloatField(null=True, blank=True, help_text='Distance au site en mètres')
+    est_hors_site = models.BooleanField(default=False)
+    device_id     = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        verbose_name = 'Position agent'
+        verbose_name_plural = 'Positions agents'
+        ordering = ['-timestamp']
+        indexes = [models.Index(fields=['employe', '-timestamp'])]
+
+    def __str__(self):
+        return f"{self.employe} — {self.timestamp}"
+
+    def save(self, *args, **kwargs):
+        from django.utils import timezone as tz
+        if self.timestamp is None:
+            self.timestamp = tz.now()
+        if self.site_affecte and self.latitude and self.longitude and self.site_affecte.latitude and self.site_affecte.longitude:
+            self.distance_site = distance_metres(
+                self.latitude, self.longitude,
+                self.site_affecte.latitude, self.site_affecte.longitude,
+            )
+            self.est_hors_site = self.distance_site > self.site_affecte.rayon_geofence
+        super().save(*args, **kwargs)
+
+
+class EloignementAgent(models.Model):
+    """Période pendant laquelle un agent est resté hors de son site."""
+    employe      = models.ForeignKey('employes.Employe', on_delete=models.CASCADE, related_name='eloignements')
+    site         = models.ForeignKey('sites_rh.Site', null=True, blank=True, on_delete=models.SET_NULL, related_name='eloignements')
+    debut        = models.DateTimeField()
+    fin          = models.DateTimeField(null=True, blank=True)
+    distance_max = models.FloatField(default=0, help_text='Distance max atteinte en mètres')
+    est_actif    = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = 'Éloignement agent'
+        verbose_name_plural = 'Éloignements agents'
+        ordering = ['-debut']
+
+    def __str__(self):
+        return f"{self.employe} — éloignement {self.debut.strftime('%d/%m/%Y %H:%M')}"
+
+    @property
+    def duree_minutes(self):
+        from django.utils import timezone as tz
+        end = self.fin or tz.now()
+        return max(0, round((end - self.debut).total_seconds() / 60, 1))
+
+    @property
+    def duree_heures(self):
+        return round(self.duree_minutes / 60, 2)
+
+
 class AnomaliePointage(models.Model):
     TYPE_CHOICES = [
         ('hors_zone', 'Hors zone GPS'),
