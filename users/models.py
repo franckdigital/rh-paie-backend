@@ -27,7 +27,7 @@ class User(AbstractUser):
         'superviseur': ['pointage.create', 'pointage.view', 'planning.view', 'employes.view', 'presences.view'],
         'chef_equipe': ['pointage.create', 'planning.view', 'presences.view', 'employes.view'],
         'secretaire_rh': ['employes.view', 'conges.view', 'documents.view'],
-        'employe': ['profil.self', 'conges.self', 'bulletins.self', 'planning.self'],
+        'employe': ['pointage.create', 'pointage.view', 'profil.self', 'conges.self', 'bulletins.self', 'planning.self'],
     }
 
     role = models.CharField(max_length=30, choices=ROLE_CHOICES, default='employe')
