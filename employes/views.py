@@ -92,6 +92,34 @@ class EmployeViewSet(viewsets.ModelViewSet):
         hist = employe.historique_affectations.all()
         return Response(AffectationHistoriqueSerializer(hist, many=True).data)
 
+    @action(detail=True, methods=['post'], url_path='creer-compte')
+    def creer_compte(self, request, pk=None):
+        """Crée un compte utilisateur lié à cet employé."""
+        from users.models import User
+        employe = self.get_object()
+        if employe.user_id:
+            return Response({'detail': 'Cet employé a déjà un compte utilisateur.'}, status=status.HTTP_400_BAD_REQUEST)
+        username = request.data.get('username', '').strip()
+        password = request.data.get('password', '').strip()
+        role     = request.data.get('role', 'employe')
+        if not username or not password:
+            return Response({'detail': 'username et password sont requis.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(password) < 8:
+            return Response({'detail': 'Le mot de passe doit contenir au moins 8 caractères.'}, status=status.HTTP_400_BAD_REQUEST)
+        if User.objects.filter(username=username).exists():
+            return Response({'detail': 'Ce nom d\'utilisateur est déjà pris.'}, status=status.HTTP_400_BAD_REQUEST)
+        user = User(
+            username=username, email=employe.email,
+            first_name=employe.prenom, last_name=employe.nom,
+            role=role, telephone=employe.telephone or '',
+            site=employe.site, entreprise=employe.entreprise,
+        )
+        user.set_password(password)
+        user.save()
+        employe.user = user
+        employe.save(update_fields=['user'])
+        return Response({'detail': 'Compte créé avec succès.', 'username': username, 'user_id': user.id})
+
     @action(detail=False, methods=['get'], url_path='mon-site')
     def mon_site(self, request):
         """Retourne les employés du site de l'utilisateur connecté (app mobile superviseur)."""
