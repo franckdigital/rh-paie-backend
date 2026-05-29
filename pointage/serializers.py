@@ -32,6 +32,12 @@ class PointageEntreeSerializer(serializers.ModelSerializer):
             'device_id', 'device_imei', 'gps_mock_detecte', 'photo_selfie',
             'shift_prevu', 'pointe_par', 'note_superviseur'
         ]
+        extra_kwargs = {
+            'employe':            {'required': False},
+            'datetime_pointage':  {'required': False},
+            'date_pointage':      {'required': False},
+            'site':               {'required': False},
+        }
 
     def create(self, validated_data):
         pointage = Pointage(**validated_data)

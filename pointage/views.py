@@ -20,6 +20,24 @@ class PointageViewSet(viewsets.ModelViewSet):
             return PointageEntreeSerializer
         return PointageSerializer
 
+    def perform_create(self, serializer):
+        from employes.models import Employe
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        now = timezone.now()
+        employe = getattr(self.request.user, 'employe', None)
+        if not employe:
+            try:
+                employe = Employe.objects.get(email=self.request.user.email, statut='actif')
+            except Employe.DoesNotExist:
+                raise DRFValidationError({'detail': 'Aucun profil employé associé à ce compte.'})
+        site = self.request.user.site or employe.site
+        serializer.save(
+            employe=employe,
+            datetime_pointage=now,
+            date_pointage=now.date(),
+            site=site,
+        )
+
     @action(detail=False, methods=['get'])
     def aujourd_hui(self, request):
         """Tous les pointages du jour courant pour un site."""
