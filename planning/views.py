@@ -215,10 +215,15 @@ class LignePlanningViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='mon-planning')
     def mon_planning(self, request):
-        from employes.models import Employe
+        employe = None
         try:
-            employe = Employe.objects.get(email=request.user.email)
-        except Employe.DoesNotExist:
+            employe = request.user.employe
+        except Exception:
+            pass
+        if not employe and request.user.email:
+            from employes.models import Employe
+            employe = Employe.objects.filter(email=request.user.email).first()
+        if not employe:
             return Response([])
         date_debut = request.query_params.get('date_debut')
         date_fin = request.query_params.get('date_fin')
@@ -230,4 +235,30 @@ class LignePlanningViewSet(viewsets.ModelViewSet):
             d = date.fromisoformat(date_debut)
             date_fin = (d + timedelta(days=6)).isoformat()
         qs = self.get_queryset().filter(employe=employe, date__gte=date_debut, date__lte=date_fin).order_by('date')
+        return Response(LignePlanningSerializer(qs, many=True).data)
+
+    @action(detail=False, methods=['get'], url_path='planning-equipe')
+    def planning_equipe(self, request):
+        """Planning de tous les agents du site du superviseur connecté."""
+        date_debut = request.query_params.get('date_debut')
+        date_fin = request.query_params.get('date_fin')
+        if not date_debut:
+            today = date.today()
+            monday = today - timedelta(days=today.weekday())
+            date_debut = monday.isoformat()
+        if not date_fin:
+            d = date.fromisoformat(date_debut)
+            date_fin = (d + timedelta(days=6)).isoformat()
+        site = request.user.site
+        if not site:
+            try:
+                from employes.models import Employe
+                emp = Employe.objects.get(email=request.user.email)
+                site = emp.site
+            except Exception:
+                pass
+        qs = self.get_queryset().filter(date__gte=date_debut, date__lte=date_fin)
+        if site:
+            qs = qs.filter(employe__site=site)
+        qs = qs.select_related('employe', 'shift').order_by('date', 'employe__nom')
         return Response(LignePlanningSerializer(qs, many=True).data)

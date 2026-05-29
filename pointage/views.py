@@ -29,28 +29,35 @@ class PointageViewSet(viewsets.ModelViewSet):
         from rest_framework.exceptions import ValidationError as DRFValidationError
         now = timezone.now()
 
-        # 1. Via OneToOneField (si compte créé avec creer-compte)
-        employe = None
-        try:
-            employe = self.request.user.employe
-        except Exception:
-            pass
+        # En mode superviseur, l'employe est fourni explicitement dans le body
+        req_employe = serializer.validated_data.get('employe')
+        req_mode    = serializer.validated_data.get('mode', '')
+        is_sup_mode = req_mode in ('tablette_superviseur', 'superviseur')
 
-        # 2. Fallback par email (seed / admin Django)
-        if not employe and self.request.user.email:
-            employe = Employe.objects.filter(email=self.request.user.email).first()
-
-        if not employe:
-            raise DRFValidationError({'detail': 'Aucun profil employé associé à ce compte.'})
-
-        # Lier le compte pour les prochains appels
-        if not employe.user_id:
-            employe.user = self.request.user
-            employe.save(update_fields=['user'])
+        if is_sup_mode and req_employe:
+            employe = req_employe if hasattr(req_employe, 'id') else Employe.objects.filter(id=req_employe).first()
+            if not employe:
+                raise DRFValidationError({'detail': 'Employé introuvable.'})
+            pointe_par = self.request.user
+        else:
+            # Mode agent : utiliser l'employé du user connecté
+            employe = None
+            try:
+                employe = self.request.user.employe
+            except Exception:
+                pass
+            if not employe and self.request.user.email:
+                employe = Employe.objects.filter(email=self.request.user.email).first()
+            if not employe:
+                raise DRFValidationError({'detail': 'Aucun profil employé associé à ce compte.'})
+            # Lier le compte pour les prochains appels
+            if not employe.user_id:
+                employe.user = self.request.user
+                employe.save(update_fields=['user'])
+            pointe_par = None
 
         site = self.request.user.site or employe.site
 
-        # Résoudre le shift planifié du jour
         from planning.models import LignePlanning
         ligne = LignePlanning.objects.filter(
             employe=employe, date=now.date()
@@ -63,6 +70,7 @@ class PointageViewSet(viewsets.ModelViewSet):
             date_pointage=now.date(),
             site=site,
             shift_prevu=shift_prevu,
+            pointe_par=pointe_par,
         )
 
     @action(detail=False, methods=['get'])

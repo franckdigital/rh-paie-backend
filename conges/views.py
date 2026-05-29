@@ -8,6 +8,19 @@ from users.permissions import RBACPermission
 from config.csv_utils import csv_response
 
 
+def _get_employe(request):
+    """Retourne l'Employe lié au user connecté (via relation directe puis email)."""
+    employe = None
+    try:
+        employe = request.user.employe
+    except Exception:
+        pass
+    if not employe and request.user.email:
+        from employes.models import Employe
+        employe = Employe.objects.filter(email=request.user.email).first()
+    return employe
+
+
 class TypeCongeViewSet(viewsets.ModelViewSet):
     queryset = TypeConge.objects.all()
     serializer_class = TypeCongeSerializer
@@ -25,10 +38,8 @@ class SoldeCongeViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'], url_path='mes-soldes')
     def mes_soldes(self, request):
         """Soldes de congé de l'employé connecté."""
-        from employes.models import Employe
-        try:
-            employe = Employe.objects.get(email=request.user.email)
-        except Employe.DoesNotExist:
+        employe = _get_employe(request)
+        if not employe:
             return Response([])
         annee = timezone.now().year
         qs = self.get_queryset().filter(employe=employe, annee=annee)
@@ -90,17 +101,26 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        demande = serializer.save()
+        employe = serializer.validated_data.get('employe') or _get_employe(self.request)
+        if not employe:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'employe': 'Profil employé introuvable pour cet utilisateur.'})
+        # Calculer nombre_jours si absent
+        nb_jours = serializer.validated_data.get('nombre_jours')
+        if not nb_jours:
+            from datetime import date as _date
+            d1 = serializer.validated_data.get('date_debut')
+            d2 = serializer.validated_data.get('date_fin')
+            nb_jours = max(1, (d2 - d1).days + 1) if (d1 and d2) else 1
+        demande = serializer.save(employe=employe, nombre_jours=nb_jours)
         from config.emails import notifier_demande_conge
         notifier_demande_conge(demande)
 
     @action(detail=False, methods=['get'], url_path='mes-demandes')
     def mes_demandes(self, request):
         """Demandes de congé de l'employé connecté."""
-        from employes.models import Employe
-        try:
-            employe = Employe.objects.get(email=request.user.email)
-        except Employe.DoesNotExist:
+        employe = _get_employe(request)
+        if not employe:
             return Response([])
         qs = self.get_queryset().filter(employe=employe).order_by('-created_at')
         return Response(DemandeCongeSerializer(qs, many=True).data)

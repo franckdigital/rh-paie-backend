@@ -142,10 +142,15 @@ class BulletinPaieViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='mes-bulletins')
     def mes_bulletins(self, request):
         """Bulletins de paie de l'employé connecté (usage mobile)."""
-        from employes.models import Employe
+        employe = None
         try:
-            employe = Employe.objects.get(email=request.user.email)
-        except Employe.DoesNotExist:
+            employe = request.user.employe
+        except Exception:
+            pass
+        if not employe and request.user.email:
+            from employes.models import Employe
+            employe = Employe.objects.filter(email=request.user.email).first()
+        if not employe:
             return Response([])
         qs = self.get_queryset().filter(employe=employe).order_by('-periode_fin')
         return Response(BulletinPaieSerializer(qs, many=True).data)

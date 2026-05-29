@@ -24,3 +24,7 @@ class DemandeCongeSerializer(serializers.ModelSerializer):
         model = DemandeConge
         fields = '__all__'
         read_only_fields = ['approuve_par', 'date_approbation']
+        extra_kwargs = {
+            'employe':     {'required': False},
+            'nombre_jours': {'required': False},
+        }
