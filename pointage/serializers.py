@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Pointage, AnomaliePointage
+from .models import Pointage, AnomaliePointage, VerrouAppareil
 
 
 class PointageSerializer(serializers.ModelSerializer):
@@ -101,3 +101,12 @@ class AnomaliePointageSerializer(serializers.ModelSerializer):
     class Meta:
         model = AnomaliePointage
         fields = '__all__'
+
+
+class VerrouAppareilSerializer(serializers.ModelSerializer):
+    employe_nom       = serializers.CharField(source='employe.nom_complet', read_only=True)
+    employe_matricule = serializers.CharField(source='employe.matricule', read_only=True)
+
+    class Meta:
+        model  = VerrouAppareil
+        fields = ['id', 'device_id', 'employe', 'employe_nom', 'employe_matricule', 'locked_at']

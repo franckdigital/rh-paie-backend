@@ -129,6 +129,24 @@ class Pointage(models.Model):
         return anomalies
 
 
+class VerrouAppareil(models.Model):
+    """Verrouille un appareil mobile à un employé après son premier pointage."""
+    device_id  = models.CharField(max_length=200, unique=True, verbose_name='ID appareil')
+    employe    = models.ForeignKey(
+        'employes.Employe', on_delete=models.CASCADE,
+        related_name='verrous_appareils', verbose_name='Propriétaire'
+    )
+    locked_at  = models.DateTimeField(verbose_name='Verrouillé le')
+
+    class Meta:
+        verbose_name = 'Verrou appareil'
+        verbose_name_plural = 'Verrous appareils'
+        ordering = ['-locked_at']
+
+    def __str__(self):
+        return f"{self.employe} — {self.device_id[:40]}"
+
+
 class AnomaliePointage(models.Model):
     TYPE_CHOICES = [
         ('hors_zone', 'Hors zone GPS'),

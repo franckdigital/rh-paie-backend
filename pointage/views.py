@@ -3,8 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
-from .models import Pointage, AnomaliePointage
-from .serializers import PointageSerializer, PointageEntreeSerializer, AnomaliePointageSerializer
+from .models import Pointage, AnomaliePointage, VerrouAppareil
+from .serializers import PointageSerializer, PointageEntreeSerializer, AnomaliePointageSerializer, VerrouAppareilSerializer
 from users.permissions import RBACPermission
 
 
@@ -181,6 +181,66 @@ class PointageViewSet(viewsets.ModelViewSet):
         })
 
 
+    @action(detail=False, methods=['get'], url_path='verifier-verrou')
+    def verifier_verrou(self, request):
+        """Vérifie si l'appareil est verrouillé et par qui."""
+        from employes.models import Employe
+        device_id = request.query_params.get('device_id', '').strip()
+        if not device_id:
+            return Response({'locked': False})
+
+        verrou = VerrouAppareil.objects.select_related('employe').filter(device_id=device_id).first()
+        if not verrou:
+            return Response({'locked': False})
+
+        # Identifier l'employé courant
+        employe_actuel = None
+        try:
+            employe_actuel = request.user.employe
+        except Exception:
+            employe_actuel = Employe.objects.filter(email=request.user.email).first()
+
+        est_moi = bool(employe_actuel and verrou.employe_id == employe_actuel.id)
+        return Response({
+            'locked':       True,
+            'est_moi':      est_moi,
+            'proprietaire': verrou.employe.nom_complet,
+            'locked_at':    verrou.locked_at.isoformat(),
+            'verrou_id':    verrou.id,
+        })
+
+    @action(detail=False, methods=['post'], url_path='verrouiller')
+    def verrouiller(self, request):
+        """Verrouille l'appareil à l'employé connecté après son pointage."""
+        from employes.models import Employe
+        device_id = request.data.get('device_id', '').strip()
+        if not device_id:
+            return Response({'detail': 'device_id requis'}, status=status.HTTP_400_BAD_REQUEST)
+
+        employe = None
+        try:
+            employe = request.user.employe
+        except Exception:
+            employe = Employe.objects.filter(email=request.user.email).first()
+
+        if not employe:
+            return Response({'detail': 'Profil employé introuvable'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Refuser si déjà verrouillé par quelqu'un d'autre
+        existing = VerrouAppareil.objects.filter(device_id=device_id).first()
+        if existing and existing.employe_id != employe.id:
+            return Response(
+                {'detail': f"Appareil verrouillé par {existing.employe.nom_complet}"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        VerrouAppareil.objects.update_or_create(
+            device_id=device_id,
+            defaults={'employe': employe, 'locked_at': timezone.now()},
+        )
+        return Response({'status': 'verrouillé', 'proprietaire': employe.nom_complet})
+
+
 class AnomaliePointageViewSet(viewsets.ModelViewSet):
     queryset = AnomaliePointage.objects.select_related('employe', 'pointage').all()
     serializer_class = AnomaliePointageSerializer
@@ -196,3 +256,21 @@ class AnomaliePointageViewSet(viewsets.ModelViewSet):
         anomalie.traite_par = request.user
         anomalie.save()
         return Response({'status': 'justifié'})
+
+
+class VerrouAppareilViewSet(viewsets.GenericViewSet,
+                            viewsets.mixins.ListModelMixin,
+                            viewsets.mixins.DestroyModelMixin):
+    """Liste et déverrouillage des appareils (admin)."""
+    queryset = VerrouAppareil.objects.select_related('employe').all()
+    serializer_class = VerrouAppareilSerializer
+    rbac_module = 'pointage'
+    permission_classes = [permissions.IsAuthenticated, RBACPermission]
+
+    @action(detail=True, methods=['post'])
+    def deverrouiller(self, request, pk=None):
+        verrou = self.get_object()
+        nom = verrou.employe.nom_complet
+        device = verrou.device_id
+        verrou.delete()
+        return Response({'status': 'déverrouillé', 'proprietaire': nom, 'device_id': device})
