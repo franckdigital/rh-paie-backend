@@ -7,7 +7,7 @@ class UserSerializer(serializers.ModelSerializer):
     entreprise_nom = serializers.CharField(source='entreprise.nom', read_only=True)
     site_nom       = serializers.CharField(source='site.nom', read_only=True)
     role_display   = serializers.CharField(source='get_role_display', read_only=True)
-    role_label     = serializers.CharField(source='role_label', read_only=True)
+    role_label     = serializers.CharField(read_only=True)
     role_obj_label = serializers.CharField(source='role_obj.label', read_only=True, allow_null=True)
     role_obj_couleur = serializers.CharField(source='role_obj.couleur', read_only=True, allow_null=True)
 
